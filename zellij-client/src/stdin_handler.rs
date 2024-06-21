@@ -1,6 +1,6 @@
 use crate::keyboard_parser::KittyKeyboardParser;
 use crate::os_input_output::ClientOsApi;
-use crate::stdin_ansi_parser::StdinAnsiParser;
+use crate::stdin_ansi_parser::{AnsiStdinInstruction, StdinAnsiParser};
 use crate::InputInstruction;
 use std::sync::{Arc, Mutex};
 use zellij_utils::channels::SenderWithContext;
@@ -60,9 +60,10 @@ pub(crate) fn stdin_loop(
         }
     }
     let mut ansi_stdin_events = vec![];
+    let mut partial_osc : Vec<u8> = vec![];
     loop {
         match os_input.read_from_stdin() {
-            Ok(buf) => {
+            Ok(mut buf) => {
                 {
                     // here we check if we need to parse specialized ANSI instructions sent over STDIN
                     // this happens either on startup (see above) or on SIGWINCH
@@ -86,6 +87,44 @@ pub(crate) fn stdin_loop(
                         .unwrap()
                         .write_cache(ansi_stdin_events.drain(..).collect());
                 }
+
+                // TODO handle special case where buf ends on ESC
+                // this is also the case if an OSC is split right after an ESC. Those wont work
+
+                let mut oscs : Vec<std::ops::Range<usize>> = Vec::new();
+                let mut osc_start = if !partial_osc.is_empty() { Some(0) } else { None };
+
+                let mut last_esc = false;
+                for (i, &byte) in buf.iter().enumerate() {
+                    match (osc_start, byte, last_esc) {
+                        (Some(j), b'\x07', _) |
+                        (Some(j), b'\\', true) => {
+                            oscs.push(j..i + 1);
+                            osc_start = None;
+                        },
+                        (None, b']', true) => {
+                            osc_start = Some(i - 1);
+                        },
+                        _ => {}
+                    }
+                    last_esc = byte == b'\x1b';
+                }
+                let ansi_events = oscs.into_iter().map(|osc| {
+                    let mut sequence : Vec<u8> = partial_osc.drain(..).collect();
+                    sequence.append(&mut buf.drain(osc).collect());
+                    AnsiStdinInstruction::Passthrough(sequence)
+                }).collect();
+
+                let _ = send_input_instructions
+                    .send(InputInstruction::AnsiStdinInstructions(ansi_events));
+
+                match osc_start {
+                    Some(i) => {
+                        partial_osc.append(&mut buf.drain(i..).collect());
+                    },
+                    None => {}
+                }
+
                 current_buffer.append(&mut buf.to_vec());
 
                 if !explicitly_disable_kitty_keyboard_protocol {

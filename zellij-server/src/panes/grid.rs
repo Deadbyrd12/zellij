@@ -357,6 +357,7 @@ pub struct Grid {
     pub focus_event_tracking: bool,
     pub search_results: SearchResult,
     pub pending_clipboard_update: Option<String>,
+    pub passthrough_sequences: Vec<String>,
     ui_component_bytes: Option<Vec<u8>>,
     style: Style,
     debug: bool,
@@ -503,6 +504,7 @@ impl Grid {
             search_results: Default::default(),
             sixel_grid,
             pending_clipboard_update: None,
+            passthrough_sequences: vec![],
             ui_component_bytes: None,
             style,
             debug,
@@ -2379,7 +2381,8 @@ impl Perform for Grid {
                 let _clipboard = params[1].get(0).unwrap_or(&b'c');
                 match params[2] {
                     b"?" => {
-                        // TBD: paste from own clipboard - currently unsupported
+                        let sequence = format!("\u{1b}]52;c;?{terminator}");
+                        self.passthrough_sequences.push(sequence);
                     },
                     base64 => {
                         if let Ok(bytes) = base64::decode(base64) {

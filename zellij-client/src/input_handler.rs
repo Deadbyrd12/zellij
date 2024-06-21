@@ -212,6 +212,10 @@ impl InputHandler {
                     .send(ClientInstruction::SetSynchronizedOutput(enabled))
                     .unwrap();
             },
+            AnsiStdinInstruction::Passthrough(sequence) => {
+                let seq_str = String::from_utf8(sequence).expect("Found invalid UTF-8");
+                self.dispatch_action(Action::WriteChars(seq_str), None);
+            },
         }
     }
     fn handle_mouse_event(&mut self, mouse_event: &MouseEvent) {

@@ -180,6 +180,7 @@ pub enum AnsiStdinInstruction {
     ForegroundColor(String),
     ColorRegisters(Vec<(usize, String)>),
     SynchronizedOutput(Option<SyncOutput>),
+    Passthrough(Vec<u8>)
 }
 
 impl AnsiStdinInstruction {

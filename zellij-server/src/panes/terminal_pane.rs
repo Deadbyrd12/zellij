@@ -543,6 +543,10 @@ impl Pane for TerminalPane {
         self.grid.pending_clipboard_update.take()
     }
 
+    fn drain_passthrough_sequences(&mut self) -> Vec<String> {
+        self.grid.passthrough_sequences.drain(..).collect()
+    }
+
     fn start_selection(&mut self, start: &Position, _client_id: ClientId) {
         self.grid.start_selection(start);
         self.set_should_render(true);
@@ -900,7 +904,7 @@ impl TerminalPane {
         raw_input_bytes: Vec<u8>,
         raw_input_bytes_are_kitty: bool,
     ) -> Option<AdjustedInput> {
-        if raw_input_bytes_are_kitty {
+        if raw_input_bytes_are_kitty || key.is_none() {
             Some(AdjustedInput::WriteBytesToTerminal(raw_input_bytes))
         } else {
             // here what happens is that the host terminal is operating in non "kitty keys" mode, but
@@ -987,7 +991,7 @@ impl TerminalPane {
                 ));
             }
         }
-        if raw_input_bytes_are_kitty {
+        if raw_input_bytes_are_kitty && key.is_some() {
             // here what happens is that the host terminal is operating in "kitty keys" mode, but
             // this terminal pane is not - so we need to serialize the kitty key to "non kitty" if
             // possible - if not possible (eg. with multiple modifiers), we'll return a None here

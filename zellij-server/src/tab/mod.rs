@@ -361,6 +361,9 @@ pub trait Pane {
     fn drain_clipboard_update(&mut self) -> Option<String> {
         None
     }
+    fn drain_passthrough_sequences(&mut self) -> Vec<String> {
+        vec![]
+    }
     fn render_full_viewport(&mut self) {}
     fn relative_position(&self, position_on_screen: &Position) -> Position {
         position_on_screen.relative_to(self.get_content_y(), self.get_content_x())
@@ -1608,12 +1611,17 @@ impl Tab {
             terminal_output.handle_pty_bytes(bytes);
             let messages_to_pty = terminal_output.drain_messages_to_pty();
             let clipboard_update = terminal_output.drain_clipboard_update();
+            let passthrough_sequences = terminal_output.drain_passthrough_sequences();
             for message in messages_to_pty {
                 self.write_to_pane_id_without_preprocessing(message, PaneId::Terminal(pid))
                     .with_context(err_context)?;
             }
             if let Some(string) = clipboard_update {
                 self.write_selection_to_clipboard(&string)
+                    .with_context(err_context)?;
+            }
+            for sequence in passthrough_sequences {
+                self.send_sequence(&sequence)
                     .with_context(err_context)?;
             }
         }
@@ -3436,6 +3444,31 @@ impl Tab {
 
         Ok(())
     }
+
+    fn send_sequence(&self, sequence: &str) -> Result<()> {
+        let err_context = || format!("failed to send sequence to clients: '{}'", sequence);
+
+        let mut output = Output::default();
+        let connected_clients: HashSet<ClientId> =
+            { self.connected_clients.borrow().iter().copied().collect() };
+        output.add_clients(&connected_clients, self.link_handler.clone(), None);
+        let client_ids = connected_clients.iter().copied();
+
+        output.add_pre_vte_instruction_to_multiple_clients(
+            client_ids,
+            sequence
+        );
+
+        output.serialize()
+            .and_then(|serialized_output| {
+                self.senders
+                    .send_to_server(ServerInstruction::Render(Some(serialized_output)))
+            })
+            .with_context(err_context)?;
+
+        Ok(())
+    }
+
     pub fn visible(&self, visible: bool) -> Result<()> {
         let pids_in_this_tab = self.tiled_panes.pane_ids().filter_map(|p| match p {
             PaneId::Plugin(pid) => Some(pid),
